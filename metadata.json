@@ -1,0 +1,6 @@
+{
+  "name": "Kantin Ma'had Bina Tahfidz Indonesia",
+  "description": "Sistem manajemen kasir, inventaris stok, tabungan santri, dan riwayat transaksi kantin Ma'had Bina Tahfidz Indonesia.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

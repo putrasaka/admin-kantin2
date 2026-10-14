@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Poppins', system-ui, -apple-system, sans-serif;
+  --font-roboto: 'Roboto', system-ui, -apple-system, sans-serif;
+  --color-canteen-dark: #355872;
+  --color-canteen-accent: #7AAACE;
+  --color-canteen-light: #9CD5FF;
+  --color-canteen-bg: #F7F8F0;
+}
+
+body {
+  font-family: 'Poppins', sans-serif;
+  background-color: #F7F8F0;
+  color: #1e293b;
+  min-height: 100vh;
+}
+
+.font-roboto {
+  font-family: 'Roboto', sans-serif;
+}
