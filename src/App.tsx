@@ -10,12 +10,12 @@ import {
   query,
   orderBy,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
   type User as FirebaseUser,
 } from './firebase';
 import { migrateLocalStorageToFirestore } from './migration';
+import { generateTransactionReportPdf, wibDateKey, buildDateLabel } from './pdfReport';
 import {
   Store,
   Package,
@@ -47,6 +47,7 @@ import {
   ShoppingBag,
   Download,
   Menu,
+  LogOut,
   Database
 } from 'lucide-react';
 
@@ -421,6 +422,11 @@ export default function App() {
   const [dbMethodFilter, setDbMethodFilter] = useState<'all' | 'cash' | 'saved_money'>('all');
   const [dbDateFilter, setDbDateFilter] = useState<string>('all');
   const [selectedTxDetail, setSelectedTxDetail] = useState<Transaction | null>(null);
+
+  // PDF Report state
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportDate, setReportDate] = useState<string>(''); // '' = hari ini
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   // In-app Delete Confirmation Modals (menggantikan window.confirm yang terblokir di sandbox iframe)
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
@@ -895,7 +901,6 @@ export default function App() {
     });
   }, [transactions, dbSearch, dbMethodFilter, dbDateFilter]);
 
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
@@ -906,11 +911,7 @@ export default function App() {
     setAuthError('');
     setAuthSubmitting(true);
     try {
-      if (authMode === 'login') {
-        await signInWithEmailAndPassword(auth, authEmail, authPassword);
-      } else {
-        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
-      }
+      await signInWithEmailAndPassword(auth, authEmail, authPassword);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Authentication failed';
       setAuthError(msg.replace('Firebase: ', ''));
@@ -981,19 +982,9 @@ export default function App() {
               disabled={authSubmitting}
               className="w-full py-2.5 px-4 rounded-lg bg-[#355872] hover:bg-[#284357] text-white text-sm font-semibold disabled:opacity-50 cursor-pointer transition-colors"
             >
-              {authSubmitting ? 'Memproses...' : authMode === 'login' ? 'Masuk' : 'Daftar'}
+              {authSubmitting ? 'Memproses...' : 'Masuk'}
             </button>
           </form>
-
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }}
-              className="text-xs text-[#355872] font-semibold hover:underline cursor-pointer"
-            >
-              {authMode === 'login' ? 'Belum punya akun? Daftar' : 'Sudah punya akun? Masuk'}
-            </button>
-          </div>
         </div>
       </div>
     );
@@ -1011,7 +1002,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F8F0] text-slate-800 flex flex-col font-sans w-full max-w-full overflow-x-hidden">
+    <div className="min-h-screen bg-[#F7F8F0] text-slate-800 flex flex-col font-sans w-full max-w-full overflow-x-clip">
       {/* ================= HEADER & NAVIGATION ================= */}
       <header className="sticky top-0 z-30 bg-[#355872] text-white shadow-md border-b border-[#7AAACE]/20 w-full">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
@@ -1262,9 +1253,19 @@ export default function App() {
             </div>
 
             {/* Footer Drawer */}
-            <div className="p-4 border-t border-white/10 bg-[#284357]/80 text-xs text-white/70 space-y-1">
-              <p className="font-semibold text-white/90">Kantin Ma'had MBTI</p>
-              <p className="text-[11px] text-[#9CD5FF]/80">Penyimpanan Browser LocalStorage</p>
+            <div className="p-4 border-t border-white/10 bg-[#284357]/80 space-y-3">
+              <div className="text-xs text-white/70 space-y-1">
+                <p className="font-semibold text-white/90">Kantin Ma'had MBTI</p>
+                <p className="text-[11px] text-[#9CD5FF]/80">Version 1.0.1</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-full py-2.5 px-4 rounded-lg bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/30 text-rose-200 hover:text-white text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Keluar
+              </button>
             </div>
           </div>
         </div>
@@ -1974,6 +1975,22 @@ export default function App() {
                   </select>
                 </div>
               </div>
+            </div>
+
+            {/* PDF Report Action Bar */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+              <div>
+                <h3 className="font-bold text-sm text-[#355872]">Laporan PDF</h3>
+                <p className="text-xs text-slate-500">Buat laporan rincian transaksi harian dalam format PDF.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setReportDate(''); setIsReportModalOpen(true); }}
+                className="py-2.5 px-4 rounded-lg bg-[#355872] hover:bg-[#284357] text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                Buat Laporan PDF
+              </button>
             </div>
 
             {/* Transactions Container */}
@@ -3358,6 +3375,96 @@ export default function App() {
                   Tutup
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 10. PDF REPORT MODAL */}
+      {isReportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-[#355872] p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Download className="w-5 h-5 text-[#9CD5FF]" />
+                <h3 className="font-bold text-base">Buat Laporan PDF</h3>
+              </div>
+              <button onClick={() => setIsReportModalOpen(false)} className="text-white/80 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Pilih Tanggal Laporan:</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition-all has-checked:border-[#355872] has-checked:bg-[#355872]/5 border-slate-200 hover:border-slate-300">
+                    <input
+                      type="radio"
+                      name="report-date-mode"
+                      checked={reportDate === ''}
+                      onChange={() => setReportDate('')}
+                      className="accent-[#355872]"
+                    />
+                    <span className="text-xs font-semibold text-slate-800">Hari Ini</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition-all has-checked:border-[#355872] has-checked:bg-[#355872]/5 border-slate-200 hover:border-slate-300">
+                    <input
+                      type="radio"
+                      name="report-date-mode"
+                      checked={reportDate !== ''}
+                      onChange={() => setReportDate(reportDate || wibDateKey(new Date().toISOString()))}
+                      className="accent-[#355872]"
+                    />
+                    <span className="text-xs font-semibold text-slate-800">Pilih Tanggal</span>
+                  </label>
+                  {reportDate !== '' && (
+                    <input
+                      type="date"
+                      value={reportDate}
+                      onChange={e => setReportDate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE] font-roboto"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsReportModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isGeneratingReport}
+                onClick={async () => {
+                  const targetKey = reportDate === '' ? wibDateKey(new Date().toISOString()) : reportDate;
+                  const filtered = transactions.filter(tx => wibDateKey(tx.date) === targetKey);
+                  if (filtered.length === 0) {
+                    showToast('Tidak ada transaksi pada tanggal tersebut.');
+                    return;
+                  }
+                  setIsGeneratingReport(true);
+                  try {
+                    await generateTransactionReportPdf(filtered, buildDateLabel(targetKey));
+                    setIsReportModalOpen(false);
+                    showToast('Laporan PDF berhasil dibuat.');
+                  } catch (err) {
+                    console.error('[PDF] Gagal membuat laporan:', err);
+                    showToast('Gagal membuat laporan PDF.');
+                  } finally {
+                    setIsGeneratingReport(false);
+                  }
+                }}
+                className="px-5 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] disabled:opacity-40 rounded-lg shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Download className="w-4 h-4" />
+                {isGeneratingReport ? 'Membuat...' : 'Buat Laporan'}
+              </button>
             </div>
           </div>
         </div>

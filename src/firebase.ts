@@ -15,7 +15,6 @@ import {
 import {
   getAuth,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
   type User,
@@ -50,7 +49,6 @@ export {
   orderBy,
   writeBatch,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
 };
