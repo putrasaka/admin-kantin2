@@ -620,28 +620,25 @@ export default function App() {
         studentBalanceAfter: newBal
       };
 
-      // Update student balance & history
+      // Update student balance & history (eksplisit, dipakai untuk state + Firestore)
+      const logItem: StudentLog = {
+        id: `log-${Date.now()}`,
+        date: displayDate,
+        type: 'purchase',
+        amount: cartTotal,
+        description: `Belanja Kantin (${txItems.map(i => `${i.productName} x${i.quantity}`).join(', ')})`,
+        balanceAfter: newBal
+      };
+      const updatedStudent: Student = {
+        ...matchedStudent!,
+        balance: newBal,
+        lastUpdated: displayDate,
+        history: [logItem, ...matchedStudent!.history]
+      };
       setStudents(prev =>
-        prev.map(s => {
-          if (s.id === matchedStudent!.id) {
-            const logItem: StudentLog = {
-              id: `log-${Date.now()}`,
-              date: displayDate,
-              type: 'purchase',
-              amount: cartTotal,
-              description: `Belanja Kantin (${txItems.map(i => `${i.productName} x${i.quantity}`).join(', ')})`,
-              balanceAfter: newBal
-            };
-            return {
-              ...s,
-              balance: newBal,
-              lastUpdated: displayDate,
-              history: [logItem, ...s.history]
-            };
-          }
-          return s;
-        })
+        prev.map(s => (s.id === matchedStudent!.id ? updatedStudent : s))
       );
+      await fsUpdateStudent(updatedStudent);
     }
 
     // Deduct stock in Inventory
@@ -663,12 +660,6 @@ export default function App() {
       }
       return Promise.resolve();
     }));
-    if (paymentMethod === 'saved_money' && matchedStudent) {
-      const updatedStudent = students.find(s => s.id === matchedStudent!.id);
-      if (updatedStudent) {
-        await fsUpdateStudent(updatedStudent);
-      }
-    }
     await fsAddTransaction(newTx);
 
     // Close payment modal, show success receipt modal, clear cart
@@ -2041,7 +2032,7 @@ export default function App() {
                           ) : (
                             <span className="inline-flex items-center gap-1 text-xs font-semibold bg-[#9CD5FF]/30 text-[#355872] border border-[#7AAACE]/40 px-2 py-0.5 rounded">
                               <Wallet className="w-3.5 h-3.5" />
-                              Saved Money
+                              Uang Tersimpan
                             </span>
                           )}
                         </td>
@@ -2092,7 +2083,7 @@ export default function App() {
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-[#9CD5FF]/30 text-[#355872] border border-[#7AAACE]/40 px-2 py-0.5 rounded">
                             <Wallet className="w-3 h-3" />
-                            Saved Money
+                            Uang Tersimpan
                           </span>
                         )}
                         <button
