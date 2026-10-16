@@ -551,7 +551,8 @@ export default function App() {
   // Execute Payment
   const handleConfirmPayment = async () => {
     const trimmedName = customerName.trim();
-    if (!trimmedName) return;
+    if (!trimmedName || isSubmitting) return;
+    setIsSubmitting(true);
 
     // Check saved money requirements
     if (paymentMethod === 'saved_money') {
@@ -667,12 +668,14 @@ export default function App() {
     setSuccessTransaction(newTx);
     setCart([]);
     setCustomerName('');
+    setIsSubmitting(false);
   };
 
   // Product CRUD
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!productFormData.name?.trim()) return;
+    if (!productFormData.name?.trim() || isSubmitting) return;
+    setIsSubmitting(true);
 
     if (viewProduct && isEditProductModalOpen) {
       const updated: Product = {
@@ -700,6 +703,7 @@ export default function App() {
       await fsUpdateProduct(newProd);
       setIsAddProductModalOpen(false);
     }
+    setIsSubmitting(false);
   };
 
   const handleDeleteProduct = async (productId: string) => {
@@ -767,7 +771,8 @@ export default function App() {
   const handleSaveDepositOrStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = depositFormData.fullName.trim();
-    if (!name) return;
+    if (!name || isSubmitting) return;
+    setIsSubmitting(true);
 
     const amount = Number(depositFormData.amount);
     if (isNaN(amount) || amount <= 0) {
@@ -836,6 +841,7 @@ export default function App() {
       amount: 20000,
       note: 'Setoran Tambahan Tabungan'
     });
+    setIsSubmitting(false);
   };
 
   const fsUpdateProduct = useCallback(async (product: Product) => {
@@ -896,6 +902,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2539,8 +2546,9 @@ export default function App() {
                 type="button"
                 onClick={handleConfirmPayment}
                 disabled={
-                  paymentMethod === 'saved_money' &&
-                  (!matchedStudent || matchedStudent.balance < cartTotal)
+                  isSubmitting ||
+                  (paymentMethod === 'saved_money' &&
+                  (!matchedStudent || matchedStudent.balance < cartTotal))
                 }
                 className="px-5 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] disabled:opacity-40 disabled:cursor-not-allowed rounded-lg shadow-xs cursor-pointer flex items-center gap-1.5"
               >
@@ -2839,7 +2847,8 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] rounded-lg cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] rounded-lg cursor-pointer disabled:opacity-50"
                 >
                   Simpan Perubahan
                 </button>
@@ -3052,7 +3061,8 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] rounded-lg cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] rounded-lg cursor-pointer disabled:opacity-50"
                 >
                   Simpan Produk
                 </button>
@@ -3160,7 +3170,8 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] rounded-lg cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] rounded-lg cursor-pointer disabled:opacity-50"
                 >
                   Simpan Deposit
                 </button>
