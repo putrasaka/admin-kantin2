@@ -10,6 +10,7 @@ import {
   query,
   orderBy,
   writeBatch,
+  waitForPendingWrites,
   setLogLevel,
 } from 'firebase/firestore';
 import {
@@ -48,6 +49,7 @@ export {
   query,
   orderBy,
   writeBatch,
+  waitForPendingWrites,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,

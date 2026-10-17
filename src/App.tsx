@@ -9,6 +9,7 @@ import {
   onSnapshot,
   query,
   orderBy,
+  waitForPendingWrites,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -69,7 +70,7 @@ export interface CartItem {
 export interface StudentLog {
   id: string;
   date: string;
-  type: 'deposit' | 'purchase';
+  type: 'deposit' | 'purchase' | 'withdrawal';
   amount: number;
   description: string;
   balanceAfter: number;
@@ -416,6 +417,13 @@ export default function App() {
     amount: 20000,
     note: 'Setoran Tambahan Tabungan'
   });
+  const [isWithdrawalModalOpen, setIsWithdrawalModalOpen] = useState(false);
+  const [withdrawalFormData, setWithdrawalFormData] = useState({
+    studentId: '',
+    fullName: '',
+    amount: 0,
+    note: 'Penarikan Tunai'
+  });
 
   // Database Filters
   const [dbSearch, setDbSearch] = useState('');
@@ -640,6 +648,7 @@ export default function App() {
         prev.map(s => (s.id === matchedStudent!.id ? updatedStudent : s))
       );
       await fsUpdateStudent(updatedStudent);
+      await waitForPendingWrites(db);
     }
 
     // Deduct stock in Inventory
@@ -662,6 +671,7 @@ export default function App() {
       return Promise.resolve();
     }));
     await fsAddTransaction(newTx);
+    await waitForPendingWrites(db);
 
     // Close payment modal, show success receipt modal, clear cart
     setIsPaymentModalOpen(false);
@@ -842,6 +852,59 @@ export default function App() {
       note: 'Setoran Tambahan Tabungan'
     });
     setIsSubmitting(false);
+  };
+
+  const handleWithdrawal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    const student = students.find(s => s.id === withdrawalFormData.studentId);
+    if (!student) return;
+    const amount = Number(withdrawalFormData.amount);
+    if (isNaN(amount) || amount < 1000) {
+      showToast('Jumlah penarikan minimal Rp 1.000!');
+      return;
+    }
+    if (amount > student.balance) {
+      showToast(`Saldo tidak mencukupi! Saldo: ${formatRupiah(student.balance)}.`);
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const newBal = student.balance - amount;
+      const now = new Date();
+      const displayDate = now.toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      const logItem: StudentLog = {
+        id: `log-${Date.now()}`,
+        date: displayDate,
+        type: 'withdrawal',
+        amount,
+        description: withdrawalFormData.note.trim() || 'Penarikan Tunai',
+        balanceAfter: newBal
+      };
+      const updated: Student = {
+        ...student,
+        balance: newBal,
+        lastUpdated: displayDate,
+        history: [logItem, ...student.history]
+      };
+      setStudents(prev => prev.map(s => (s.id === student.id ? updated : s)));
+      await fsUpdateStudent(updated);
+      await waitForPendingWrites(db);
+      setIsWithdrawalModalOpen(false);
+      setWithdrawalFormData({ studentId: '', fullName: '', amount: 0, note: 'Penarikan Tunai' });
+      showToast(`Penarikan ${formatRupiah(amount)} berhasil.`);
+    } catch (err) {
+      console.error('[Withdrawal] Gagal:', err);
+      showToast('Gagal memproses penarikan.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const fsUpdateProduct = useCallback(async (product: Product) => {
@@ -1858,6 +1921,23 @@ export default function App() {
                           >
                             <Plus className="w-3.5 h-3.5" />
                             Top Up
+                          </button>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setWithdrawalFormData({
+                                studentId: student.id,
+                                fullName: student.fullName,
+                                amount: 0,
+                                note: 'Penarikan Tunai'
+                              });
+                              setIsWithdrawalModalOpen(true);
+                            }}
+                            className="px-2.5 py-1.5 rounded-md bg-amber-500/15 hover:bg-amber-500/30 text-amber-700 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Banknote className="w-3.5 h-3.5" />
+                            Tarik
                           </button>
                           <button
                             type="button"
@@ -3181,6 +3261,80 @@ export default function App() {
         </div>
       )}
 
+      {/* 7B. WITHDRAWAL MODAL (SAVED MONEY) */}
+      {isWithdrawalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-[#355872] p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Banknote className="w-5 h-5 text-[#9CD5FF]" />
+                <h3 className="font-bold text-base">Tarik Tabungan</h3>
+              </div>
+              <button onClick={() => setIsWithdrawalModalOpen(false)} className="text-white/80 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleWithdrawal} className="p-4 sm:p-5 space-y-3.5">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs">
+                <span className="text-slate-500">Saldo Tersedia</span>
+                <span className="font-bold text-[#355872] font-roboto">
+                  {formatRupiah(students.find(s => s.id === withdrawalFormData.studentId)?.balance || 0)}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Jumlah Penarikan (Rp) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">Rp</span>
+                  <input
+                    type="number"
+                    min="1000"
+                    step="500"
+                    required
+                    value={withdrawalFormData.amount || ''}
+                    onChange={e => setWithdrawalFormData({ ...withdrawalFormData, amount: Number(e.target.value) })}
+                    placeholder="Masukkan jumlah..."
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE] font-roboto font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Catatan / Keterangan</label>
+                <input
+                  type="text"
+                  value={withdrawalFormData.note}
+                  onChange={e => setWithdrawalFormData({ ...withdrawalFormData, note: e.target.value })}
+                  placeholder="Keperluan penarikan..."
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE]"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsWithdrawalModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-[#355872] hover:bg-[#284357] disabled:opacity-40 rounded-lg cursor-pointer flex items-center gap-1.5"
+                >
+                  <Banknote className="w-4 h-4" />
+                  {isSubmitting ? 'Memproses...' : 'Tarik Sekarang'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 8. STUDENT DETAIL & USAGE HISTORY MODAL (SAVED MONEY DETAIL) */}
       {viewStudent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
@@ -3229,6 +3383,10 @@ export default function App() {
                               <span className="text-emerald-600 font-bold flex items-center gap-0.5">
                                 [Setoran/Deposit]
                               </span>
+                            ) : item.type === 'withdrawal' ? (
+                              <span className="text-amber-600 font-bold flex items-center gap-0.5">
+                                [Penarikan Tunai]
+                              </span>
                             ) : (
                               <span className="text-rose-600 font-bold flex items-center gap-0.5">
                                 [Belanja Kantin]
@@ -3242,7 +3400,7 @@ export default function App() {
                         <div className="text-right font-roboto">
                           <span
                             className={`font-bold block ${
-                              item.type === 'deposit' ? 'text-emerald-700' : 'text-rose-600'
+                              item.type === 'deposit' ? 'text-emerald-700' : item.type === 'withdrawal' ? 'text-amber-700' : 'text-rose-600'
                             }`}
                           >
                             {item.type === 'deposit' ? '+' : '-'}
