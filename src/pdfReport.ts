@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import type { Transaction } from './App';
+import type { Product, Transaction } from './App';
 
 const MONTH_ID = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
@@ -28,7 +28,11 @@ const rgb = (hex: string): [number, number, number] => {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 };
 
-export async function generateTransactionReportPdf(transactions: Transaction[], dateLabel: string): Promise<void> {
+export async function generateTransactionReportPdf(
+  transactions: Transaction[],
+  dateLabel: string,
+  products: Product[]
+): Promise<void> {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -56,7 +60,7 @@ export async function generateTransactionReportPdf(transactions: Transaction[], 
   doc.text(`Kantin Ma'had Bina Tahfidz • Tanggal: ${dateLabel}`, margin + 5, y + 12.5);
   y += 24;
 
-  // ===== SECTION TITLE =====
+  // ===== SECTION: RINCIAN TRANSAKSI =====
   doc.setFillColor(...rgb('#355872'));
   doc.rect(margin, y + 0.5, 2, 7, 'F');
   doc.setFont('helvetica', 'bold');
@@ -65,7 +69,6 @@ export async function generateTransactionReportPdf(transactions: Transaction[], 
   doc.text('RINCIAN TRANSAKSI PER PEMBELI', margin + 5, y + 6);
   y += 13;
 
-  // ===== TRANSACTION CARDS =====
   const lineColor = rgb('#e2e8f0');
   const qtyX = margin + contentW - 38; // tepi kanan kolom qty/harga
   const subX = margin + contentW - 6; // tepi kanan kolom subtotal
@@ -85,7 +88,7 @@ export async function generateTransactionReportPdf(transactions: Transaction[], 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(...rgb('#1e293b'));
-    doc.text(`${idx + 1}. ${tx.customerName}`, margin + 4, y + 6.5);
+    doc.text(`${idx + 1}. ${tx.customerName}`, margin + 5, y + 7);
     const nameW = doc.getTextWidth(`${idx + 1}. ${tx.customerName}`);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
@@ -134,6 +137,110 @@ export async function generateTransactionReportPdf(transactions: Transaction[], 
 
     y += cardH + 4;
   });
+
+  // ===== SECTION: REKAP PENJUALAN & KEUNTUNGAN =====
+  y += 6;
+  ensureSpace(60);
+  doc.setFillColor(...rgb('#355872'));
+  doc.rect(margin, y + 0.5, 2, 7, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(...rgb('#355872'));
+  doc.text('REKAP PENJUALAN & KEUNTUNGAN', margin + 5, y + 6);
+  y += 13;
+
+  // Agregasi per produk dari transaksi hari itu
+  const costByProduct = new Map<string, number>();
+  products.forEach(p => costByProduct.set(p.name, p.costPrice));
+
+  const agg = new Map<string, { qty: number; revenue: number; profit: number }>();
+  transactions.forEach(tx => {
+    tx.items.forEach(item => {
+      const cost = costByProduct.get(item.productName) ?? 0;
+      const prev = agg.get(item.productName) || { qty: 0, revenue: 0, profit: 0 };
+      prev.qty += item.quantity;
+      prev.revenue += item.subtotal;
+      prev.profit += Math.max(0, item.price - cost) * item.quantity;
+      agg.set(item.productName, prev);
+    });
+  });
+
+  // Header tabel
+  const colName = margin + 4;
+  const colQty = margin + contentW - 90;
+  const colRev = margin + contentW - 48;
+  const colProfit = margin + contentW - 4;
+  const rowH = 7;
+
+  doc.setFillColor(...rgb('#355872'));
+  doc.roundedRect(margin, y, contentW, 8, 2, 2, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('NAMA BARANG', colName + 2, y + 5.5);
+  doc.text('TOTAL TERJUAL', colQty, y + 5.5, { align: 'right' });
+  doc.text('TOTAL HARGA TERJUAL', colRev, y + 5.5, { align: 'right' });
+  doc.text('KEUNTUNGAN', colProfit, y + 5.5, { align: 'right' });
+  y += 8;
+
+  // Baris per produk
+  let totalQty = 0;
+  let totalRev = 0;
+  let totalProfit = 0;
+  let idx = 0;
+  agg.forEach((v, name) => {
+    if (y + rowH > pageH - margin) {
+      doc.addPage();
+      y = margin;
+    }
+    const bg = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
+    doc.setFillColor(...rgb(bg));
+    doc.setDrawColor(...lineColor);
+    doc.setLineWidth(0.3);
+    doc.rect(margin, y, contentW, rowH, 'FD');
+    doc.setTextColor(...rgb('#334155'));
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`${idx + 1}. ${name}`, colName + 2, y + 4.8);
+    doc.setTextColor(...rgb('#64748b'));
+    doc.text(String(v.qty), colQty, y + 4.8, { align: 'right' });
+    doc.setTextColor(...rgb('#0f172a'));
+    doc.text(formatRp(v.revenue), colRev, y + 4.8, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...rgb('#15803d'));
+    doc.text(formatRp(v.profit), colProfit, y + 4.8, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    totalQty += v.qty;
+    totalRev += v.revenue;
+    totalProfit += v.profit;
+    y += rowH;
+    idx++;
+  });
+
+  // Baris TOTAL
+  if (y + rowH + 2 > pageH - margin) {
+    doc.addPage();
+    y = margin;
+  }
+  doc.setFillColor(...rgb('#e2e8f0'));
+  doc.setDrawColor(...rgb('#cbd5e1'));
+  doc.setLineWidth(0.3);
+  doc.rect(margin, y, contentW, rowH, 'FD');
+  doc.setTextColor(...rgb('#0f172a'));
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('TOTAL :', colName + 2, y + 4.8);
+  doc.text(String(totalQty), colQty, y + 4.8, { align: 'right' });
+  doc.text(formatRp(totalRev), colRev, y + 4.8, { align: 'right' });
+  doc.setTextColor(...rgb('#15803d'));
+  doc.text(formatRp(totalProfit), colProfit, y + 4.8, { align: 'right' });
+  y += rowH + 6;
+
+  // Catatan keuntungan
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...rgb('#94a3b8'));
+  doc.text('Catatan: Keuntungan = (Harga Jual − Harga Beli) × jumlah terjual. Produk tanpa harga beli dihitung 0.', margin, y + 2);
 
   // ===== PAGE NUMBERS =====
   const totalPages = doc.getNumberOfPages();

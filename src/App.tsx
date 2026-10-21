@@ -15,7 +15,6 @@ import {
   onAuthStateChanged,
   type User as FirebaseUser,
 } from './firebase';
-import { migrateLocalStorageToFirestore } from './migration';
 import { generateTransactionReportPdf, wibDateKey, buildDateLabel } from './pdfReport';
 import {
   Store,
@@ -58,6 +57,7 @@ export interface Product {
   name: string;
   category: string;
   price: number;
+  costPrice: number; // harga beli per unit
   stock: number;
   unit: string;
 }
@@ -109,16 +109,16 @@ export interface Transaction {
 
 // --- Initial Seed Data ---
 const INITIAL_PRODUCTS: Product[] = [
-  { id: 'prod-1', name: 'Roti Gandum Madu', category: 'Makanan', price: 4000, stock: 25, unit: 'pcs' },
-  { id: 'prod-2', name: 'Air Mineral Barokah 600ml', category: 'Minuman', price: 3000, stock: 48, unit: 'botol' },
-  { id: 'prod-3', name: 'Susu Kurma Segar', category: 'Minuman', price: 7000, stock: 18, unit: 'botol' },
-  { id: 'prod-4', name: 'Nasi Kuning Santri', category: 'Makanan', price: 8000, stock: 15, unit: 'porsi' },
-  { id: 'prod-5', name: 'Keripik Tempe Renyah', category: 'Snack', price: 3500, stock: 30, unit: 'bks' },
-  { id: 'prod-6', name: 'Buku Catatan Tahfidz', category: 'Alat Tulis', price: 6000, stock: 40, unit: 'buku' },
-  { id: 'prod-7', name: 'Pulpen Gel Hitam 0.5', category: 'Alat Tulis', price: 2500, stock: 50, unit: 'pcs' },
-  { id: 'prod-8', name: 'Madu Randu Asli Sachet', category: 'Herbal', price: 5000, stock: 22, unit: 'sachet' },
-  { id: 'prod-9', name: 'Sari Kurma Barokah', category: 'Herbal', price: 12000, stock: 10, unit: 'botol' },
-  { id: 'prod-10', name: 'Siomay Kukus Ikan', category: 'Makanan', price: 5000, stock: 20, unit: 'porsi' }
+  { id: 'prod-1', name: 'Roti Gandum Madu', category: 'Makanan', price: 4000, costPrice: 3200, stock: 25, unit: 'pcs' },
+  { id: 'prod-2', name: 'Air Mineral Barokah 600ml', category: 'Minuman', price: 3000, costPrice: 2100, stock: 48, unit: 'botol' },
+  { id: 'prod-3', name: 'Susu Kurma Segar', category: 'Minuman', price: 7000, costPrice: 5500, stock: 18, unit: 'botol' },
+  { id: 'prod-4', name: 'Nasi Kuning Santri', category: 'Makanan', price: 8000, costPrice: 6200, stock: 15, unit: 'porsi' },
+  { id: 'prod-5', name: 'Keripik Tempe Renyah', category: 'Snack', price: 3500, costPrice: 2600, stock: 30, unit: 'bks' },
+  { id: 'prod-6', name: 'Buku Catatan Tahfidz', category: 'Alat Tulis', price: 6000, costPrice: 4500, stock: 40, unit: 'buku' },
+  { id: 'prod-7', name: 'Pulpen Gel Hitam 0.5', category: 'Alat Tulis', price: 2500, costPrice: 1700, stock: 50, unit: 'pcs' },
+  { id: 'prod-8', name: 'Madu Randu Asli Sachet', category: 'Herbal', price: 5000, costPrice: 3800, stock: 22, unit: 'sachet' },
+  { id: 'prod-9', name: 'Sari Kurma Barokah', category: 'Herbal', price: 12000, costPrice: 9200, stock: 10, unit: 'botol' },
+  { id: 'prod-10', name: 'Siomay Kukus Ikan', category: 'Makanan', price: 5000, costPrice: 3900, stock: 20, unit: 'porsi' }
 ];
 
 const INITIAL_STUDENTS: Student[] = [
@@ -235,84 +235,8 @@ const formatRupiah = (val: number): string => {
   }).format(val || 0);
 };
 
-// ================= LOCALSTORAGE STORAGE KEYS & HELPERS =================
-// 1. Struktur Key LocalStorage yang jelas & terpisah per modul
-export const STORAGE_KEYS = {
-  INVENTORY: 'canteen_inventory',
-  STUDENTS: 'canteen_students',
-  TRANSACTIONS: 'canteen_transactions'
-} as const;
-
-// 4. Helper Functions utilitas penyimpanan data dengan try-catch error handling
-export const storageHelper = {
-  /**
-   * Mengambil data dari LocalStorage dengan parsing JSON aman.
-   * Jika kosong, otomatis menginisialisasi defaultValue ke LocalStorage.
-   */
-  get<T>(key: string, defaultValue: T, legacyKey?: string): T {
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored !== null && stored !== 'undefined') {
-        return JSON.parse(stored) as T;
-      }
-      // Dukungan migrasi jika data pernah disimpan dengan key lama
-      if (legacyKey) {
-        const legacyStored = localStorage.getItem(legacyKey);
-        if (legacyStored !== null && legacyStored !== 'undefined') {
-          const parsed = JSON.parse(legacyStored) as T;
-          localStorage.setItem(key, JSON.stringify(parsed));
-          return parsed;
-        }
-      }
-      // 2. Inisialisasi data awal (Mock Data) ke LocalStorage jika belum ada data
-      localStorage.setItem(key, JSON.stringify(defaultValue));
-      return defaultValue;
-    } catch (err) {
-      console.error(`[LocalStorage Error] Gagal membaca key "${key}":`, err);
-      return defaultValue;
-    }
-  },
-
-  /**
-   * Menyimpan data ke LocalStorage dengan serialisasi JSON aman.
-   */
-  set<T>(key: string, value: T): boolean {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch (err) {
-      console.error(`[LocalStorage Error] Gagal menulis key "${key}":`, err);
-      return false;
-    }
-  },
-
-  /**
-   * Menghapus spesifik key dari LocalStorage.
-   */
-  remove(key: string): void {
-    try {
-      localStorage.removeItem(key);
-    } catch (err) {
-      console.error(`[LocalStorage Error] Gagal menghapus key "${key}":`, err);
-    }
-  },
-
-  /**
-   * Mengosongkan seluruh data modul kantin di LocalStorage.
-   */
-  clearAll(): void {
-    try {
-      localStorage.removeItem(STORAGE_KEYS.INVENTORY);
-      localStorage.removeItem(STORAGE_KEYS.STUDENTS);
-      localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
-      localStorage.removeItem('mbti_canteen_products');
-      localStorage.removeItem('mbti_canteen_students');
-      localStorage.removeItem('mbti_canteen_transactions');
-    } catch (err) {
-      console.error('[LocalStorage Error] Gagal mengosongkan storage:', err);
-    }
-  }
-};
+// ================= CURRENCY FORMATTER =================
+export { formatRupiah };
 
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -345,30 +269,24 @@ export default function App() {
     let unsubTransactions: (() => void) | undefined;
     let cancelled = false;
 
-    migrateLocalStorageToFirestore()
-      .catch((err) => {
-        console.error('[Migration] Gagal migrasi ke Firestore:', err);
-      })
-      .then(() => {
-        if (cancelled) return;
-        const qProducts = query(collection(db, 'products'));
-        const qStudents = query(collection(db, 'students'));
-        const qTransactions = query(collection(db, 'transactions'), orderBy('date', 'desc'));
+    if (cancelled) return;
+    const qProducts = query(collection(db, 'products'));
+    const qStudents = query(collection(db, 'students'));
+    const qTransactions = query(collection(db, 'transactions'), orderBy('date', 'desc'));
 
-        const onErr = (err: unknown) => {
-          console.error('[Firestore] Listener error:', err);
-        };
-        unsubProducts = onSnapshot(qProducts, (snap) => {
-          setProducts(snap.docs.map((d) => d.data() as Product));
-        }, onErr);
-        unsubStudents = onSnapshot(qStudents, (snap) => {
-          setStudents(snap.docs.map((d) => d.data() as Student));
-        }, onErr);
-        unsubTransactions = onSnapshot(qTransactions, (snap) => {
-          setTransactions(snap.docs.map((d) => d.data() as Transaction));
-        }, onErr);
-        setDbReady(true);
-      });
+    const onErr = (err: unknown) => {
+      console.error('[Firestore] Listener error:', err);
+    };
+    unsubProducts = onSnapshot(qProducts, (snap) => {
+      setProducts(snap.docs.map((d) => d.data() as Product));
+    }, onErr);
+    unsubStudents = onSnapshot(qStudents, (snap) => {
+      setStudents(snap.docs.map((d) => d.data() as Student));
+    }, onErr);
+    unsubTransactions = onSnapshot(qTransactions, (snap) => {
+      setTransactions(snap.docs.map((d) => d.data() as Transaction));
+    }, onErr);
+    setDbReady(true);
 
     return () => {
       cancelled = true;
@@ -403,6 +321,7 @@ export default function App() {
     name: '',
     category: 'Makanan',
     price: 5000,
+    costPrice: 4000,
     stock: 10,
     unit: 'pcs'
   });
@@ -469,8 +388,9 @@ export default function App() {
     const totalItems = products.length;
     const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
     const totalPotentialRevenue = products.reduce((sum, p) => sum + (p.stock * p.price), 0);
+    const totalPotentialProfit = products.reduce((sum, p) => sum + (p.stock * Math.max(0, p.price - p.costPrice)), 0);
     const lowStockCount = products.filter(p => p.stock <= 5).length;
-    return { totalItems, totalStock, totalPotentialRevenue, lowStockCount };
+    return { totalItems, totalStock, totalPotentialRevenue, totalPotentialProfit, lowStockCount };
   }, [products]);
 
   // Students statistics
@@ -693,6 +613,7 @@ export default function App() {
         name: productFormData.name || viewProduct.name,
         category: productFormData.category || viewProduct.category,
         price: Number(productFormData.price) || 0,
+        costPrice: Math.max(0, Number(productFormData.costPrice) || 0),
         stock: Number(productFormData.stock) || 0,
         unit: productFormData.unit || viewProduct.unit
       };
@@ -706,6 +627,7 @@ export default function App() {
         name: productFormData.name.trim(),
         category: productFormData.category || 'Makanan',
         price: Math.max(0, Number(productFormData.price) || 0),
+        costPrice: Math.max(0, Number(productFormData.costPrice) || 0),
         stock: Math.max(0, Number(productFormData.stock) || 0),
         unit: productFormData.unit?.trim() || 'pcs'
       };
@@ -1317,7 +1239,7 @@ export default function App() {
             <div className="p-4 border-t border-white/10 bg-[#284357]/80 space-y-3">
               <div className="text-xs text-white/70 space-y-1">
                 <p className="font-semibold text-white/90">Kantin Ma'had MBTI</p>
-                <p className="text-[11px] text-[#9CD5FF]/80">Version 1.0.1</p>
+                <p className="text-[11px] text-[#9CD5FF]/80">Version 1.4.3</p>
               </div>
               <button
                 type="button"
@@ -1702,6 +1624,19 @@ export default function App() {
               </div>
 
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
+                <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-700">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 font-medium">Total Keuntungan Potensial</p>
+                  <p className="text-xl font-bold text-emerald-700 font-roboto">
+                    {formatRupiah(inventoryStats.totalPotentialProfit)}
+                  </p>
+                  <p className="text-[11px] text-slate-400">Rumus: Jumlah item × (Harga Jual − Harga Beli)</p>
+                </div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
                 <div className="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-700">
                   <AlertTriangle className="w-6 h-6" />
                 </div>
@@ -1778,6 +1713,9 @@ export default function App() {
 
                       <div className="mt-2 text-xs text-slate-500 font-roboto">
                         Harga Satuan: <span className="font-bold text-slate-800">{formatRupiah(product.price)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-emerald-600 font-roboto">
+                        Keuntungan: <span className="font-bold">{formatRupiah(Math.max(0, product.price - product.costPrice) * product.stock)}</span>
                       </div>
                     </div>
 
@@ -2894,6 +2832,18 @@ export default function App() {
                 </div>
 
                 <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Harga Beli (Rp)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={productFormData.costPrice || 0}
+                    onChange={e => setProductFormData({ ...productFormData, costPrice: Number(e.target.value) })}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE] font-roboto"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Jumlah Stok</label>
                   <input
                     type="number"
@@ -2904,17 +2854,17 @@ export default function App() {
                     className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE] font-roboto"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Satuan Unit</label>
-                <input
-                  type="text"
-                  placeholder="pcs, botol, porsi, bks..."
-                  value={productFormData.unit || 'pcs'}
-                  onChange={e => setProductFormData({ ...productFormData, unit: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE]"
-                />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Satuan Unit</label>
+                  <input
+                    type="text"
+                    placeholder="pcs, botol, porsi, bks..."
+                    value={productFormData.unit || 'pcs'}
+                    onChange={e => setProductFormData({ ...productFormData, unit: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE]"
+                  />
+                </div>
               </div>
 
               <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
@@ -3108,6 +3058,18 @@ export default function App() {
                 </div>
 
                 <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Harga Beli (Rp)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={productFormData.costPrice || 0}
+                    onChange={e => setProductFormData({ ...productFormData, costPrice: Number(e.target.value) })}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE] font-roboto"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Jumlah Stok</label>
                   <input
                     type="number"
@@ -3118,17 +3080,17 @@ export default function App() {
                     className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE] font-roboto"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Satuan Unit</label>
-                <input
-                  type="text"
-                  placeholder="pcs, botol, porsi, bks..."
-                  value={productFormData.unit || 'pcs'}
-                  onChange={e => setProductFormData({ ...productFormData, unit: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE]"
-                />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Satuan Unit</label>
+                  <input
+                    type="text"
+                    placeholder="pcs, botol, porsi, bks..."
+                    value={productFormData.unit || 'pcs'}
+                    onChange={e => setProductFormData({ ...productFormData, unit: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7AAACE]"
+                  />
+                </div>
               </div>
 
               <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
@@ -3610,7 +3572,7 @@ export default function App() {
                   }
                   setIsGeneratingReport(true);
                   try {
-                    await generateTransactionReportPdf(filtered, buildDateLabel(targetKey));
+                    await generateTransactionReportPdf(filtered, buildDateLabel(targetKey), products);
                     setIsReportModalOpen(false);
                     showToast('Laporan PDF berhasil dibuat.');
                   } catch (err) {

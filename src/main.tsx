@@ -1,31 +1,57 @@
-import {createRoot} from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
 declare const __BUILD_ID__: string;
 
-// Version gate: bundle ID di cache beda dari build sekarang -> hapus semua cache + LocalStorage, lalu reload 1x
+const MAX_UPDATE_ATTEMPTS = 3;
+
+const setBootStatus = (text: string) => {
+  const el = document.getElementById('boot-status');
+  if (el) el.textContent = text;
+};
+
+const hideBootLoader = () => {
+  const loader = document.getElementById('boot-loader');
+  if (loader) loader.style.display = 'none';
+};
+
+// Pastikan web selalu menampilkan versi terbaru: cek build-id dari server,
+// kalau beda → bersihkan cache lama dan reload (maks 3x). Kalau gagal, tampilkan versi yang ada.
 (async () => {
   try {
+    const attempts = Number(sessionStorage.getItem('__update_attempts') || '0');
+    if (attempts >= MAX_UPDATE_ATTEMPTS) {
+      hideBootLoader();
+      return;
+    }
+
+    const res = await fetch('/index.html', { cache: 'no-store' });
+    if (!res.ok) {
+      hideBootLoader();
+      return;
+    }
+    const html = await res.text();
+    const match = html.match(/<meta name="build-id" content="([^"]+)"/);
+    const serverBuildId = match?.[1] || '';
+
+    if (serverBuildId === __BUILD_ID__) {
+      sessionStorage.removeItem('__update_attempts');
+      hideBootLoader();
+      return;
+    }
+
+    // Versi server lebih baru → purge cache lalu reload
+    setBootStatus('Memperbarui ke versi terbaru...');
     if ('caches' in window) {
       const keys = await caches.keys();
-      for (const name of keys) {
-        const cache = await caches.open(name);
-        const res = await cache.match('/index.html');
-        if (res) {
-          const html = await res.text();
-          if (!html.includes(__BUILD_ID__)) {
-            const allKeys = await caches.keys();
-            await Promise.all(allKeys.map((k) => caches.delete(k)));
-            localStorage.clear();
-            location.reload();
-            return;
-          }
-        }
-      }
+      await Promise.all(keys.map((k) => caches.delete(k)));
     }
+    sessionStorage.setItem('__update_attempts', String(attempts + 1));
+    window.location.reload();
   } catch {
-    // Cache API tidak tersedia — lanjut normal
+    // Gagal cek (offline, dll) → tampilkan versi yang ada
+    hideBootLoader();
   }
 })();
 

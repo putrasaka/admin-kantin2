@@ -3,11 +3,22 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
 
+const BUILD_ID = Date.now().toString(36);
+
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'inject-build-id',
+        transformIndexHtml(html) {
+          return html.replace('</head>', `<meta name="build-id" content="${BUILD_ID}"></head>`);
+        },
+      },
+    ],
     define: {
-      __BUILD_ID__: JSON.stringify(Date.now().toString(36)),
+      __BUILD_ID__: JSON.stringify(BUILD_ID),
     },
     resolve: {
       alias: {
